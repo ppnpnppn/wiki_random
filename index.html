@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Wikiランダム">
+<meta name="color-scheme" content="light dark">
+<title>Wikipedia ランダム記事</title>
+<style>
+  :root { --bg:#fff; --fg:#1c1c1e; --sub:#6e6e73; --line:#d8d8dc; --accent:#0a66d6; --card:#f4f4f6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#000; --fg:#f2f2f7; --sub:#98989f; --line:#38383a; --accent:#4da3ff; --card:#1c1c1e; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; padding:16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left));
+    background:var(--bg); color:var(--fg);
+    font:16px/1.5 -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif;
+  }
+  main { max-width:760px; margin:0 auto; }
+  h1 { font-size:20px; margin:8px 0 16px; }
+  form { display:flex; flex-wrap:wrap; gap:10px; align-items:end; margin-bottom:16px; }
+  label { display:flex; flex-direction:column; font-size:13px; color:var(--sub); gap:4px; }
+  input, select, button { font:inherit; font-size:16px; /* 16px未満だとiOSが自動ズームする */ }
+  input, select {
+    height:44px; padding:0 10px; border:1px solid var(--line); border-radius:10px;
+    background:var(--card); color:var(--fg);
+  }
+  input { width:90px; }
+  button {
+    height:44px; padding:0 22px; border:0; border-radius:10px;
+    background:var(--accent); color:#fff; font-weight:600;
+  }
+  button:disabled { opacity:.5; }
+  #status { color:var(--sub); font-size:14px; min-height:21px; margin-bottom:8px; }
+  #status.err { color:#d70015; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; vertical-align:top; padding:10px 6px; border-bottom:1px solid var(--line); }
+  th { font-size:13px; color:var(--sub); font-weight:500; }
+  td.n { color:var(--sub); width:2.2em; }
+  td a.t { color:var(--accent); font-weight:600; text-decoration:none; }
+  td.u { font-size:12px; color:var(--sub); word-break:break-all; }
+  @media (max-width:520px) { th.u, td.u { display:none; } } /* 狭い画面ではタイトルを主役に */
+</style>
+</head>
+<body>
+<main>
+  <h1>Wikipedia ランダム記事</h1>
+  <form id="f">
+    <label>件数
+      <input id="count" type="number" inputmode="numeric" min="1" max="500" value="10" required>
+    </label>
+    <label>言語
+      <select id="lang">
+        <option value="ja">日本語</option>
+        <option value="en">English</option>
+        <option value="zh">中文</option>
+        <option value="ko">한국어</option>
+        <option value="fr">Français</option>
+        <option value="de">Deutsch</option>
+        <option value="es">Español</option>
+      </select>
+    </label>
+    <button id="go" type="submit">取得</button>
+  </form>
+  <div id="status" role="status"></div>
+  <table id="tbl" hidden>
+    <thead><tr><th>#</th><th>タイトル(タップで開く)</th><th class="u">URL</th></tr></thead>
+    <tbody></tbody>
+  </table>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+async function fetchTitles(lang, count) {
+  const titles = [], seen = new Set();
+  for (let attempt = 0; titles.length < count; attempt++) {
+    if (attempt >= 20) throw new Error("重複が多く、必要な件数を集められませんでした。");
+    const p = new URLSearchParams({
+      action: "query", list: "random", rnnamespace: "0",
+      rnfilterredir: "nonredirects",
+      rnlimit: String(Math.min(500, count - titles.length)),
+      format: "json", origin: "*"            // origin=* でCORSを許可
+    });
+    const res = await fetch(`https://${lang}.wikipedia.org/w/api.php?${p}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    for (const { title } of data.query.random) {
+      if (!seen.has(title)) { seen.add(title); titles.push(title); }
+    }
+  }
+  return titles.slice(0, count);
+}
+
+const pageUrl = (lang, title) =>
+  `https://${lang}.wikipedia.org/wiki/${encodeURIComponent(title.replace(/ /g, "_"))}`;
+
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const lang = $("lang").value;
+  const count = Math.max(1, Math.min(500, parseInt($("count").value, 10) || 0));
+  if (!count) return;
+  $("count").value = count;
+
+  const status = $("status"), tbl = $("tbl"), body = tbl.tBodies[0], btn = $("go");
+  status.className = ""; status.textContent = "取得中…"; btn.disabled = true;
+  try {
+    const titles = await fetchTitles(lang, count);
+    body.replaceChildren(...titles.map((title, i) => {
+      const url = pageUrl(lang, title);
+      const tr = document.createElement("tr");
+      const n = document.createElement("td"); n.className = "n"; n.textContent = i + 1;
+      const t = document.createElement("td");
+      const a = document.createElement("a");
+      a.className = "t"; a.href = url; a.target = "_blank"; a.rel = "noopener";
+      a.textContent = title; t.append(a);
+      const u = document.createElement("td"); u.className = "u"; u.textContent = url;
+      tr.append(n, t, u);
+      return tr;
+    }));
+    tbl.hidden = false;
+    status.textContent = `${titles.length}件`;
+  } catch (err) {
+    tbl.hidden = true;
+    status.className = "err";
+    status.textContent = "取得に失敗しました: " + err.message;
+  } finally {
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
